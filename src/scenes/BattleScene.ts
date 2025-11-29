@@ -2,11 +2,14 @@ import Phaser from 'phaser';
 
 type BattleState = 'START' | 'PLAYER_COMMAND' | 'PLAYER_TURN' | 'ENEMY_TURN' | 'WIN' | 'LOSE';
 
+type BattlerStance = 'NORMAL' | 'DEFENSE';
+
 interface Battler {
   name: string;
   maxHp: number;
   hp: number;
   atk: number;
+  stance: BattlerStance;
 }
 
 export class BattleScene extends Phaser.Scene {
@@ -30,29 +33,51 @@ export class BattleScene extends Phaser.Scene {
   }
 
   create() {
+    this.initBattlers();
+
+    this.createTitleText();
+    this.createHpText();
+    this.createInfoText();
+
+    this.createCommandUI();
+
+    this.bindInput();
+
+    this.startBattle();
+  }
+
+  private initBattlers() {
     this.player = {
       name: 'Hero',
       maxHp: 30,
       hp: 30,
-      atk: 8
-    };
+      atk: 8,
+      stance: 'NORMAL',
+    }
     this.enemy = {
-      name: 'slime',
+      name: 'Slime',
       maxHp: 20,
       hp: 20,
-      atk: 5
-    }
+      atk: 5,
+      stance: 'NORMAL',
+    };
+  };
 
+  private createTitleText() {
     this.add.text(400, 80, 'Classic Turn Battle', {
       fontSize: '20px',
       color: '#ffffff'
     }).setOrigin(0.5, 0.5);
+  }
 
+  private createHpText() {
     this.hpText = this.add.text(40, 140, '', {
       fontSize: '16px',
-      color: '#ffffff'
-    })
+      color: '#ffffff',
+    });
+  }
 
+  private createInfoText() {
     this.infoText = this.add.text(40, 220, '', {
       fontSize: '16px',
       color: '#ffffff',
@@ -60,9 +85,9 @@ export class BattleScene extends Phaser.Scene {
         width: 720,
       }
     });
+  }
 
-    this.createCommandUI();
-
+  private bindInput() {
     const kb = this.input.keyboard;
     kb?.on('keydown-UP', () => {
       if (this.state === 'PLAYER_COMMAND') {
@@ -84,10 +109,9 @@ export class BattleScene extends Phaser.Scene {
         this.executeSelectedCommand();
       }
     });
-    this.startBattle();
   }
 
-  startBattle() {
+  private startBattle() {
     this.state = 'PLAYER_COMMAND';
     this.updateHpText();
     this.infoText.setText('플레이어의 턴입니다. 명령을 선택하세요.');
@@ -95,14 +119,14 @@ export class BattleScene extends Phaser.Scene {
     this.updateCommandHighlight();
   }
 
-  updateHpText() {
+  private updateHpText() {
     this.hpText.setText(
       `${this.player.name}'s HP : ${this.player.hp} / ${this.player.maxHp}\n` +
       `${this.enemy.name}'s HP : ${this.enemy.hp} / ${this.enemy.maxHp}`
     );
   }
 
-  createCommandUI() {
+  private createCommandUI() {
     const baseX = 40;
     const baseY = 360;
     const lineHeight = 26;
@@ -116,13 +140,13 @@ export class BattleScene extends Phaser.Scene {
     this.updateCommandHighlight();
   }
 
-  moveCommandSelection(delta: number) {
+  private moveCommandSelection(delta: number) {
     const count = this.commands.length;
     this.selectedCommandIndex = (this.selectedCommandIndex + delta + count) % count;
     this.updateCommandHighlight();
   }
 
-  updateCommandHighlight() {
+  private updateCommandHighlight() {
     this.commandTexts.forEach((text, index) => {
       const cmd = this.commands[index];
       if (index === this.selectedCommandIndex) {
@@ -135,48 +159,139 @@ export class BattleScene extends Phaser.Scene {
     })
   }
 
-  executeSelectedCommand() {
+  private executeSelectedCommand() {
     const cmd = this.commands[this.selectedCommandIndex];
+
     if (cmd === '공격') {
       this.state = 'PLAYER_TURN';
-      this.handleAction(this.player, this.enemy, 'WIN');
-      return;
-    }
-    if (cmd === '방어') {
-      this.infoText.setText('방어 기능은 아직 구현되지 않았습니다.');
-      return;
-    }
-    if (cmd === '도망') {
-      this.infoText.setText('도망 기능도 아직 구현되지 않았습니다.');
-      return;
-    }
-  }
-
-  handleAction(actor: Battler, target: Battler, killState: Extract<BattleState, 'WIN' | 'LOSE'>) {
-    const dmg = actor.atk;
-    target.hp = Math.max(0, target.hp - dmg);
-    this.updateHpText();
-    this.infoText.setText(`${actor.name}의 공격! ${target.name}에게 ${dmg} 데미지!`);
-
-    if (target.hp <= 0) {
-      this.state = killState;
-      this.time.delayedCall(800, () => {
-        this.infoText.setText((killState === 'WIN' ? '승리했습니다.' : '패배했습니다.') + ' (새로고침으로 재시작)');
+      this.runAttackTurn({
+        attacker: this.player,
+        defender: this.enemy,
+        attackerSide: 'PLAYER',
       })
       return;
     }
-    this.state = killState === 'WIN' ? 'ENEMY_TURN' : 'PLAYER_TURN';
 
-    if (killState === 'WIN') {
-      this.state = 'ENEMY_TURN';
-      this.time.delayedCall(800, () => {
-        this.handleAction(this.enemy, this.player, 'LOSE');
-      });
-    } else { // 적이 행동한 경우
-      this.state = 'PLAYER_COMMAND';
-      this.infoText.setText('플레이어의 턴입니다. 명령을 선택하세요.');
-      this.updateCommandHighlight();
+    if (cmd === '방어') {
+      this.player.stance = 'DEFENSE';
+      this.infoText.setText(`${this.player.name} 은(는) 방어 태세를 갖추었습니다.`);
+      this.startEnemyTurn();
+    }
+
+    if (cmd === '도망') {
+      this.state = 'LOSE';
+      this.infoText.setText(`${this.player.name} 은(는) 도망쳤습니다. (새로고침으로 재시작)`);
+      return;
     }
   }
 
+  private startPlayerCommandPhase() {
+    this.state = 'PLAYER_COMMAND';
+    this.player.stance = 'NORMAL';
+    this.updateHpText();
+    this.infoText.setText('플레이어의 턴입니다. 명령을 선택하세요.');
+    this.selectedCommandIndex = 0;
+    this.updateCommandHighlight();
+  }
+
+  private startEnemyTurn() {
+    this.state = 'ENEMY_TURN';
+    this.enemy.stance = 'NORMAL';
+
+    this.time.delayedCall(800, () => {
+      this.runAttackTurn({
+        attacker: this.enemy,
+        defender: this.player,
+        attackerSide: 'ENEMY',
+      });
+    });
+  }
+
+  private runAttackTurn(options: {
+    attacker: Battler;
+    defender: Battler;
+    attackerSide: 'PLAYER' | 'ENEMY';
+  }) {
+    const { attacker, defender, attackerSide } = options;
+    const damage = this.getAttackDamage(attacker, defender);
+
+    // 공격 이펙트 + 데미지 숫자 연출 후 실제 데미지 적용
+    this.playAttackEffects(attackerSide, damage, () => {
+      defender.hp = Math.max(0, defender.hp - damage);
+      this.updateHpText();
+      this.infoText.setText(`${attacker.name}의 공격! ${defender.name}에게 ${damage} 데미지!`);
+      // 사망 체크
+      if (defender.hp <= 0) {
+        const result = attackerSide === 'PLAYER' ? 'WIN' : 'LOSE';
+        this.state = result;
+        this.time.delayedCall(800, () => {
+          this.infoText.setText(`${result === 'WIN' ? '승리' : '패배'}했습니다. (새로고침으로 재시작)`);
+        });
+        return;
+      }
+      // 사망이 아닌 경우 턴 넘기기
+      if (attackerSide === 'PLAYER') {
+        this.time.delayedCall(800, () => {
+          this.startEnemyTurn();
+        });
+      } else {
+        this.time.delayedCall(800, () => {
+          this.startPlayerCommandPhase();
+        });
+      }
+    });
+  }
+
+  /**
+   * 공격 데미지를 계산한다.
+   * TODO: 버프 / 디버프 / 크리티컬이나 회피 등을 추가할 때 본 함수를 확장한다.
+   */
+  private getAttackDamage(attacker: Battler, defender: Battler): number {
+    let dmg = attacker.atk;
+
+    if (defender.stance === 'DEFENSE') {
+      dmg *= 0.5;
+    }
+    return Math.max(1, Math.round(dmg));
+  }
+
+  /**
+   * 공격 이펙트 실행
+   */
+  private playAttackEffects(
+    attackerSide: 'PLAYER' | 'ENEMY',
+    damage: number,
+    onComplete: () => void,
+  ) {
+
+    // 실제 데미지 처리를 위한 콜백 호출
+    this.time.delayedCall(420, onComplete);
+
+    // 카메라를 살짝 흔든다.
+    this.cameras.main.shake(120, 0.01);
+
+    // 데미지 숫자 텍스트 표시 위치
+    // TODO: 추후 캐릭터 속성에 위치 정보를 넣고 해당 캐릭터의 위치 정보를 활용하는 것으로 수정한다.
+    const baseX = attackerSide === 'PLAYER' ? 520 : 260;
+    const baseY = 170;
+
+    const dmgText = this.add.text(baseX, baseY, `-${damage}`, {
+      fontSize: '24px',
+      color: '#ff5555',
+      stroke: '#000000',
+      strokeThickness: 3,
+    });
+
+    // Tween으로 위로 살짝 떠오르면서 사라지게 하기
+    this.tweens.add({
+      targets: dmgText,
+      y: baseY - 20,
+      alpha: 0,
+      duration: 1000,
+      ease: 'Cubic.Out',
+      onComplete: () => {
+        dmgText.destroy();
+      },
+    });
+  }
 }
